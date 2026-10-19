@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function POST(req) {
   try {
@@ -55,52 +55,52 @@ export async function POST(req) {
     - Keep steps simple, clear, and beginner-friendly.
     `;
 
-    // Only use the models your account officially supports
-    const candidateModels = ["gemini-3.8-flash", "gemini-2.5-flash"];
-    let lastError = "";
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
 
-    for (const model of candidateModels) {
-      // Try each model up to 3 times if Google says "high demand"
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-          const response = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": apiKey,
+    let lastError = null;
+
+    // Retry loop: up to 3 tries with backoff
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              temperature: 0.7,
+              maxOutputTokens: 1500,
             },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: promptText }] }],
-              generationConfig: {
-                responseMimeType: "application/json",
-              },
-            }),
-          });
+          }),
+        });
 
-          const resJson = await response.json();
+        const resJson = await response.json();
 
-          if (response.ok && resJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
-            const rawOutput = resJson.candidates[0].content.parts[0].text;
-            return NextResponse.json(JSON.parse(rawOutput));
-          }
-
-          // If high demand (503/429), pause 2 seconds and try again automatically
-          if (response.status === 503 || response.status === 429) {
-            await wait(2000);
-            continue;
-          }
-
-          lastError = resJson?.error?.message || `Status ${response.status}`;
-          break; // If it's a different error (e.g. 404), switch to the next model
-        } catch (err) {
-          lastError = err.message;
+        if (response.ok && resJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
+          const rawOutput = resJson.candidates[0].content.parts[0].text;
+          return NextResponse.json(JSON.parse(rawOutput));
         }
+
+        // If high demand (503 / 429), pause 2 seconds and retry
+        if (response.status === 503 || response.status === 429) {
+          await wait(2000);
+          continue;
+        }
+
+        lastError = resJson?.error?.message || `HTTP ${response.status}`;
+        break;
+      } catch (err) {
+        lastError = err.message;
+        await wait(1000);
       }
     }
 
     return NextResponse.json(
-      { error: `Google API Error: ${lastError || "High traffic right now. Please tap again in 3 seconds!"}` },
+      { error: `Google API Error: ${lastError || "High server demand. Please click once more in 3 seconds."}` },
       { status: 500 }
     );
   } catch (error) {
