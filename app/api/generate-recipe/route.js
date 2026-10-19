@@ -53,36 +53,51 @@ export async function POST(req) {
     - Keep steps simple, clear, and beginner-friendly.
     `;
 
-    // Direct call using the official x-goog-api-key header for AQ. keys
-    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
-    
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: promptText }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-        },
-      }),
-    });
+    // Cascade through models: if one is overloaded or unavailable, try the next immediately
+    const fallbackModels = [
+      "gemini-2.5-flash",
+      "gemini-3.8-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+    ];
 
-    const resJson = await response.json();
+    let lastError = null;
 
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: `Google API Error: ${resJson?.error?.message || "Generation failed"}` },
-        { status: response.status }
-      );
+    for (const model of fallbackModels) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: {
+              responseMimeType: "application/json",
+            },
+          }),
+        });
+
+        const resJson = await response.json();
+
+        if (response.ok && resJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
+          const rawOutput = resJson.candidates[0].content.parts[0].text;
+          const recipeData = JSON.parse(rawOutput);
+          return NextResponse.json(recipeData);
+        }
+
+        lastError = resJson?.error?.message || `Model ${model} failed with status ${response.status}`;
+      } catch (err) {
+        lastError = err.message;
+      }
     }
 
-    const rawOutput = resJson.candidates[0].content.parts[0].text;
-    const recipeData = JSON.parse(rawOutput);
-
-    return NextResponse.json(recipeData);
+    return NextResponse.json(
+      { error: `Google API Error: ${lastError}` },
+      { status: 500 }
+    );
   } catch (error) {
     console.error("Server Route Error:", error);
     return NextResponse.json(
