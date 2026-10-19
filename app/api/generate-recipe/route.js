@@ -11,10 +11,10 @@ export async function POST(req) {
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = (process.env.GEMINI_API_KEY || "").trim();
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Gemini API key is missing from .env.local." },
+        { error: "Gemini API key is missing. Check your environment variables." },
         { status: 500 }
       );
     }
@@ -53,11 +53,15 @@ export async function POST(req) {
     - Keep steps simple, clear, and beginner-friendly.
     `;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
+    // Direct call using the official x-goog-api-key header for AQ. keys
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
     
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: promptText }] }],
         generationConfig: {
@@ -71,7 +75,7 @@ export async function POST(req) {
     if (!response.ok) {
       return NextResponse.json(
         { error: `Google API Error: ${resJson?.error?.message || "Generation failed"}` },
-        { status: 500 }
+        { status: response.status }
       );
     }
 
