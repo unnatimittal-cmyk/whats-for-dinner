@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function POST(req) {
   try {
     const { ingredients, cuisine, goal, skill } = await req.json();
@@ -53,49 +55,52 @@ export async function POST(req) {
     - Keep steps simple, clear, and beginner-friendly.
     `;
 
-    // Cascade through models: if one is overloaded or unavailable, try the next immediately
-    const fallbackModels = [
-      "gemini-2.5-flash",
-      "gemini-3.8-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-    ];
-
+    // Try primary model, retry on 503, then try fallback
+    const candidateModels = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"];
     let lastError = null;
 
-    for (const model of fallbackModels) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: promptText }] }],
-            generationConfig: {
-              responseMimeType: "application/json",
+    for (const model of candidateModels) {
+      // Allow up to 2 attempts per model to ride out temporary demand spikes
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey,
             },
-          }),
-        });
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: promptText }] }],
+              generationConfig: {
+                responseMimeType: "application/json",
+              },
+            }),
+          });
 
-        const resJson = await response.json();
+          const resJson = await response.json();
 
-        if (response.ok && resJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
-          const rawOutput = resJson.candidates[0].content.parts[0].text;
-          const recipeData = JSON.parse(rawOutput);
-          return NextResponse.json(recipeData);
+          if (response.ok && resJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
+            const rawOutput = resJson.candidates[0].content.parts[0].text;
+            return NextResponse.json(JSON.parse(rawOutput));
+          }
+
+          // If high demand (503 / 429), wait 1.2s before trying again
+          if (response.status === 503 || response.status === 429) {
+            await sleep(1200);
+            continue;
+          }
+
+          lastError = resJson?.error?.message || `Model error (${response.status})`;
+          break; // Move to the next model if it wasn't a temporary capacity issue
+        } catch (err) {
+          lastError = err.message;
         }
-
-        lastError = resJson?.error?.message || `Model ${model} failed with status ${response.status}`;
-      } catch (err) {
-        lastError = err.message;
       }
     }
 
     return NextResponse.json(
-      { error: `Google API Error: ${lastError}` },
+      { error: `Google API Error: ${lastError || "High demand, please tap again in 5 seconds."}` },
       { status: 500 }
     );
   } catch (error) {
