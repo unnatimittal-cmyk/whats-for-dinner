@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
 export async function POST(req) {
   try {
@@ -29,8 +29,8 @@ export async function POST(req) {
     - Dietary / Calorie Goal: ${goal || "Balanced"}
     - Skill Level: ${skill || "Beginner"}
 
-    Suggest 2 to 3 practical, delicious meal ideas that primarily use these ingredients.
-    Return ONLY a valid JSON object matching this schema:
+    Suggest exactly 2 to 3 fast, practical meal ideas using these ingredients.
+    Return ONLY a complete, valid JSON object matching this schema without cutting off:
     {
       "recipes": [
         {
@@ -40,26 +40,24 @@ export async function POST(req) {
           "prepTime": "20 mins",
           "calories": 450,
           "protein": "18g",
-          "pantryStaplesNeeded": ["cooking oil", "salt", "black pepper"],
+          "pantryStaplesNeeded": ["oil", "salt"],
           "instructions": [
-            "Step 1 instruction...",
-            "Step 2 instruction...",
-            "Step 3 instruction..."
+            "Step 1: Short action.",
+            "Step 2: Short action.",
+            "Step 3: Short action."
           ],
-          "chefTip": "A fast practical tip to make it taste great."
+          "chefTip": "Short practical tip."
         }
       ]
     }
     Rules:
-    - Never demand rare, exotic ingredients. Keep extra items to basic pantry staples (salt, water, cooking oil, butter, pepper).
-    - Keep steps simple, clear, and beginner-friendly.
+    - Keep steps and descriptions concise so the JSON response is compact and complete.
+    - Keep required extra ingredients to basic pantry staples (salt, oil, water, pepper).
     `;
 
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
-
     let lastError = null;
 
-    // Retry loop: up to 3 tries with backoff
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const response = await fetch(url, {
@@ -73,7 +71,7 @@ export async function POST(req) {
             generationConfig: {
               responseMimeType: "application/json",
               temperature: 0.7,
-              maxOutputTokens: 1500,
+              maxOutputTokens: 3000,
             },
           }),
         });
@@ -82,10 +80,10 @@ export async function POST(req) {
 
         if (response.ok && resJson?.candidates?.[0]?.content?.parts?.[0]?.text) {
           const rawOutput = resJson.candidates[0].content.parts[0].text;
-          return NextResponse.json(JSON.parse(rawOutput));
+          const recipeData = JSON.parse(rawOutput);
+          return NextResponse.json(recipeData);
         }
 
-        // If high demand (503 / 429), pause 2 seconds and retry
         if (response.status === 503 || response.status === 429) {
           await wait(2000);
           continue;
@@ -100,7 +98,7 @@ export async function POST(req) {
     }
 
     return NextResponse.json(
-      { error: `Google API Error: ${lastError || "High server demand. Please click once more in 3 seconds."}` },
+      { error: `Google API Error: ${lastError || "Could not complete response, please try again."}` },
       { status: 500 }
     );
   } catch (error) {
