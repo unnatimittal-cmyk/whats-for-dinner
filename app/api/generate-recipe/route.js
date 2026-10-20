@@ -19,6 +19,35 @@ export async function POST(req) {
       );
     }
 
+    // 1. Fetch the exact list of available models for your Groq account
+    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    const modelsData = await modelsRes.json();
+    if (!modelsRes.ok) {
+      return NextResponse.json(
+        { error: `Groq Auth Error: ${modelsData?.error?.message || "Failed to fetch models"}` },
+        { status: 500 }
+      );
+    }
+
+    // Pick an available text model (look for llama, mixtral, or gemma)
+    const availableIds = (modelsData.data || []).map((m) => m.id);
+    const chosenModel =
+      availableIds.find((id) => id.includes("llama-3") || id.includes("llama3")) ||
+      availableIds.find((id) => id.includes("mixtral") || id.includes("gemma")) ||
+      availableIds[0];
+
+    if (!chosenModel) {
+      return NextResponse.json(
+        { error: "No available models found for this Groq account." },
+        { status: 500 }
+      );
+    }
+
     const promptText = `
 You are a practical, fast home cook.
 Ingredients available: ${ingredients.join(", ")}
@@ -27,7 +56,7 @@ Goal: ${goal || "Quick"}
 Skill Level: ${skill || "Beginner"}
 
 Generate exactly 2 to 3 practical, delicious meal ideas using these ingredients.
-Return strictly a valid JSON object matching this schema with no markdown formatting or extra text:
+Return strictly a valid JSON object matching this schema with no markdown or extra commentary:
 {
   "recipes": [
     {
@@ -49,6 +78,7 @@ Return strictly a valid JSON object matching this schema with no markdown format
 }
 `;
 
+    // 2. Call the chat completion with the discovered model
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -56,11 +86,11 @@ Return strictly a valid JSON object matching this schema with no markdown format
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: chosenModel,
         messages: [
           {
             role: "system",
-            content: "You are a precise culinary assistant. You output valid JSON only.",
+            content: "You are a precise culinary assistant that outputs valid JSON only.",
           },
           { role: "user", content: promptText },
         ],
@@ -72,7 +102,7 @@ Return strictly a valid JSON object matching this schema with no markdown format
     const resJson = await response.json();
 
     if (!response.ok) {
-      const errMsg = resJson?.error?.message || `Groq API Error (Status ${response.status})`;
+      const errMsg = resJson?.error?.message || `Groq Error (${chosenModel}): HTTP ${response.status}`;
       return NextResponse.json({ error: errMsg }, { status: response.status });
     }
 
