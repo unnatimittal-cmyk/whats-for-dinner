@@ -56,7 +56,7 @@ Return strictly a valid JSON object matching this schema with no markdown format
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "llama-3.1-8b-instant",
         messages: [
           {
             role: "system",
